@@ -1,0 +1,21 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Allows public read of bikes, plans, and public settings
+    match /bikes/{bikeId} {
+      allow read, write: if true;
+    }
+
+    match /settings/{settingId} {
+      allow read, write: if true;
+    }
+
+    match /clients/{clientId} {
+      allow read, write: if true;
+    }
+
+    match /reservations/{reservationId} {
+      allow read, write: if true;
+    }
+  }
+}
