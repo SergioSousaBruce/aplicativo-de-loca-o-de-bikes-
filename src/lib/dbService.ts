@@ -313,3 +313,9 @@ export async function updateReservationStatus(
     ...extraUpdates,
   });
 }
+
+export async function deleteReservation(reservationId: string): Promise<void> {
+  const resRef = doc(db, 'reservations', reservationId);
+  await deleteDoc(resRef);
+}
+

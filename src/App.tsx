@@ -20,9 +20,34 @@ export default function App() {
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [clients, setClients] = useState<CustomerData[]>([]);
 
-  // Navigation views
-  const [view, setView] = useState<'home' | 'booking' | 'admin'>('home');
-  const [preselectedBike, setPreselectedBike] = useState<Bike | null>(null);
+  // Navigation views with persistence so sudden reload or exit restores view
+  const [view, setView] = useState<'home' | 'booking' | 'admin'>(() => {
+    try {
+      const saved = localStorage.getItem('pedalae_current_view');
+      if (saved === 'booking' || saved === 'admin' || saved === 'home') {
+        return saved;
+      }
+    } catch {}
+    return 'home';
+  });
+
+  const [preselectedBike, setPreselectedBike] = useState<Bike | null>(() => {
+    try {
+      const saved = localStorage.getItem('pedalae_preselected_bike');
+      if (saved) {
+        return JSON.parse(saved);
+      }
+    } catch {}
+    return null;
+  });
+
+  // Keep view saved
+  const handleSetView = (nextView: 'home' | 'booking' | 'admin') => {
+    setView(nextView);
+    try {
+      localStorage.setItem('pedalae_current_view', nextView);
+    } catch {}
+  };
 
   // Initialize DB and real-time Firestore subscriptions
   useEffect(() => {
@@ -43,23 +68,37 @@ export default function App() {
 
   const handleSelectBikeForBooking = (bike: Bike) => {
     setPreselectedBike(bike);
-    setView('booking');
+    try {
+      localStorage.setItem('pedalae_preselected_bike', JSON.stringify(bike));
+    } catch {}
+    handleSetView('booking');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleStartBooking = () => {
     setPreselectedBike(null);
-    setView('booking');
+    try {
+      localStorage.removeItem('pedalae_preselected_bike');
+    } catch {}
+    handleSetView('booking');
     window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleNavigateHome = () => {
+    handleSetView('home');
+  };
+
+  const handleToggleAdmin = () => {
+    handleSetView(view === 'admin' ? 'home' : 'admin');
   };
 
   return (
     <div className="min-h-screen bg-black text-white flex flex-col font-sans selection:bg-amber-400 selection:text-black">
       {/* Top Header */}
       <Header
-        onNavigateHome={() => setView('home')}
+        onNavigateHome={handleNavigateHome}
         onOpenBooking={handleStartBooking}
-        onOpenAdmin={() => setView(view === 'admin' ? 'home' : 'admin')}
+        onOpenAdmin={handleToggleAdmin}
         isAdminOpen={view === 'admin'}
         whatsappUrl={settings.whatsappOfficialUrl}
       />
@@ -70,6 +109,7 @@ export default function App() {
           <HomePage
             settings={settings}
             bikes={bikes}
+            reservations={reservations}
             plans={settings.plans}
             onSelectBikeForBooking={handleSelectBikeForBooking}
             onStartBooking={handleStartBooking}
@@ -84,8 +124,9 @@ export default function App() {
           <BookingFlow
             settings={settings}
             bikes={bikes}
+            reservations={reservations}
             initialBike={preselectedBike}
-            onCancel={() => setView('home')}
+            onCancel={handleNavigateHome}
             onFinished={() => {
               // Reservation created, flow displays confirmation step
             }}
@@ -98,7 +139,7 @@ export default function App() {
             bikes={bikes}
             reservations={reservations}
             clients={clients}
-            onClose={() => setView('home')}
+            onClose={handleNavigateHome}
           />
         )}
       </div>

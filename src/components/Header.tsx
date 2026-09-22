@@ -1,5 +1,5 @@
 import React from 'react';
-import { MessageCircle, Shield, Award, MapPin } from 'lucide-react';
+import { MessageCircle, Shield, Award, MapPin, Lock } from 'lucide-react';
 import { OFFICIAL_WHATSAPP_LINK } from '../lib/whatsapp';
 
 interface HeaderProps {
@@ -72,13 +72,14 @@ export const Header: React.FC<HeaderProps> = ({
             onClick={onOpenAdmin}
             className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-xl border transition-all ${
               isAdminOpen
-                ? 'bg-amber-500 text-black border-amber-400 font-bold'
-                : 'bg-zinc-900 text-zinc-300 border-zinc-700 hover:border-amber-500/50 hover:text-white'
+                ? 'bg-amber-500 text-black border-amber-400 font-bold shadow-md shadow-amber-500/20'
+                : 'bg-zinc-900/90 text-zinc-400 border-zinc-800 hover:border-amber-500/40 hover:text-white'
             }`}
+            title="Acesso Restrito - Somente Administrador"
           >
-            <Shield className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">{isAdminOpen ? 'Sair do Painel' : 'Painel Admin'}</span>
-            <span className="sm:hidden">{isAdminOpen ? 'Painel' : 'Admin'}</span>
+            <Lock className="w-3.5 h-3.5 text-amber-400" />
+            <span className="hidden sm:inline">{isAdminOpen ? 'Sair do Painel' : 'Área Restrita'}</span>
+            <span className="sm:hidden">{isAdminOpen ? 'Sair' : 'Restrito'}</span>
           </button>
         </div>
       </div>

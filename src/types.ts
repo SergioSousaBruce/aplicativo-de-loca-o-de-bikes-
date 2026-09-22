@@ -94,9 +94,13 @@ export interface Reservation {
   checkin?: CheckinData;
   checkout?: CheckoutData;
   
-  // Terms
+  // Terms & Online Digital Signature
   termAgreedOnline: boolean;
   termAgreedAt: number;
+  digitalSignatureUrl?: string; // Base64 data URL of the customer's online signature
+  digitalSignedAt?: number;
+  digitalSignerName?: string;
+  digitalSignerCpf?: string;
 
   // Cancellation
   cancellationReason?: string;
@@ -125,4 +129,5 @@ export interface SystemSettings {
   termText: string;
   cancellationPolicy: string;
   adminPasswordHash?: string;
+  adminEmail?: string;
 }

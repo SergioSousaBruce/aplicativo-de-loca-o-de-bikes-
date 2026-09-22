@@ -14,12 +14,14 @@ import {
   ShieldCheck,
   ChevronRight
 } from 'lucide-react';
-import { Bike, RentalPlan, SystemSettings } from '../types';
+import { Bike, RentalPlan, Reservation, SystemSettings } from '../types';
 import { OFFICIAL_WHATSAPP_LINK } from '../lib/whatsapp';
+import { getBikeCurrentStatus } from '../lib/bikeAvailability';
 
 interface HomePageProps {
   settings: SystemSettings;
   bikes: Bike[];
+  reservations: Reservation[];
   plans: RentalPlan[];
   onSelectBikeForBooking: (bike: Bike) => void;
   onStartBooking: () => void;
@@ -29,12 +31,13 @@ interface HomePageProps {
 export const HomePage: React.FC<HomePageProps> = ({
   settings,
   bikes,
+  reservations,
   plans,
   onSelectBikeForBooking,
   onStartBooking,
   onScrollToBikes,
 }) => {
-  const availableBikes = bikes.filter((b) => b.status === 'available');
+  const availableBikes = bikes.filter((b) => getBikeCurrentStatus(b, reservations).isAvailable);
 
   const scrollToHowItWorks = () => {
     const el = document.getElementById('section-como-funciona');
@@ -291,7 +294,8 @@ export const HomePage: React.FC<HomePageProps> = ({
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
             {bikes.map((bike) => {
-              const isAvailable = bike.status === 'available';
+              const bikeStatus = getBikeCurrentStatus(bike, reservations);
+              const isAvailable = bikeStatus.isAvailable;
               return (
                 <div
                   key={bike.id}
@@ -319,7 +323,12 @@ export const HomePage: React.FC<HomePageProps> = ({
 
                       {/* Status Badge */}
                       <div className="absolute top-3 right-3">
-                        {isAvailable ? (
+                        {bikeStatus.isInUse ? (
+                          <span className="inline-flex items-center gap-1.5 bg-rose-600/90 backdrop-blur-md border border-rose-400 text-white text-[11px] font-black px-2.5 py-0.5 rounded-full shadow-lg">
+                            <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
+                            BIKE EM USO
+                          </span>
+                        ) : isAvailable ? (
                           <span className="inline-flex items-center gap-1 bg-black/85 backdrop-blur-md border border-emerald-500/60 text-emerald-400 text-[11px] font-bold px-2.5 py-0.5 rounded-full shadow-lg">
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                             DISPONÍVEL
@@ -349,6 +358,19 @@ export const HomePage: React.FC<HomePageProps> = ({
                         </span>
                       </div>
 
+                      {/* In-use real time notice banner */}
+                      {bikeStatus.isInUse && (
+                        <div className="p-2.5 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-200 text-xs font-semibold leading-relaxed space-y-0.5">
+                          <div className="flex items-center gap-1 text-rose-300 font-bold">
+                            <span className="w-2 h-2 rounded-full bg-rose-500" />
+                            <span>Bike em uso no momento</span>
+                          </div>
+                          <p className="text-[11px] text-zinc-300">
+                            {bikeStatus.availabilityNotice}
+                          </p>
+                        </div>
+                      )}
+
                       {/* Key Features Badges matching official poster */}
                       <div className="grid grid-cols-2 gap-1.5 pt-1 text-[10px] text-zinc-400 font-medium">
                         <span className="flex items-center gap-1 bg-zinc-950 px-2 py-1 rounded border border-zinc-800/80">
@@ -368,13 +390,21 @@ export const HomePage: React.FC<HomePageProps> = ({
                       disabled={!isAvailable}
                       onClick={() => onSelectBikeForBooking(bike)}
                       className={`w-full py-3.5 px-4 rounded-xl font-black text-xs sm:text-sm flex items-center justify-center gap-2 transition-all cursor-pointer ${
-                        isAvailable
+                        bikeStatus.isInUse
+                          ? 'bg-rose-950/60 border border-rose-800 text-rose-300 cursor-not-allowed text-[11px]'
+                          : isAvailable
                           ? 'bg-gradient-to-r from-amber-500 via-amber-400 to-yellow-500 hover:brightness-110 active:scale-95 text-black shadow-lg shadow-amber-500/25'
                           : 'bg-zinc-900 text-zinc-600 border border-zinc-800 cursor-not-allowed'
                       }`}
                     >
-                      <span>🚲 {isAvailable ? 'ESCOLHER ESTA BIKE' : 'INDISPONÍVEL'}</span>
-                      {isAvailable && <ChevronRight className="w-4 h-4 text-black stroke-[3]" />}
+                      {bikeStatus.isInUse ? (
+                        <span>🔒 EM USO (LIVRE ÀS {bikeStatus.endTime})</span>
+                      ) : (
+                        <>
+                          <span>🚲 {isAvailable ? 'ESCOLHER ESTA BIKE' : 'INDISPONÍVEL'}</span>
+                          {isAvailable && <ChevronRight className="w-4 h-4 text-black stroke-[3]" />}
+                        </>
+                      )}
                     </button>
                   </div>
                 </div>

@@ -59,7 +59,10 @@ export async function generateReservationPDF(
   doc.text('TERMO E FICHA OFICIAL DE LOCAÇÃO', margin, y);
   y += 7;
 
-  // QR Code Generation
+  // Header badges: QR Code and Client Photo
+  const rightX = pageWidth - margin;
+
+  // 1. QR Code Generation (top right)
   try {
     const qrDataUrl = await QRCode.toDataURL(reservation.code, {
       margin: 1,
@@ -69,14 +72,40 @@ export async function generateReservationPDF(
         light: '#ffffff',
       },
     });
-    doc.addImage(qrDataUrl, 'PNG', pageWidth - margin - 26, y - 6, 26, 26);
+    doc.addImage(qrDataUrl, 'PNG', rightX - 24, y - 6, 24, 24);
   } catch (err) {
     console.warn('QR code generation note:', err);
   }
 
+  // 2. Client Photo (if present in customerSnapshot)
+  const clientPhoto = reservation.customerSnapshot?.photoBase64;
+  if (clientPhoto) {
+    try {
+      // Border container for photo
+      doc.setFillColor(240, 240, 240);
+      doc.roundedRect(rightX - 52, y - 6, 25, 25, 1.5, 1.5, 'F');
+      doc.setDrawColor(245, 184, 0); // Gold border
+      doc.setLineWidth(0.4);
+      doc.roundedRect(rightX - 52, y - 6, 25, 25, 1.5, 1.5, 'S');
+
+      // Add image inside box
+      const format = clientPhoto.startsWith('data:image/png') ? 'PNG' : 'JPEG';
+      doc.addImage(clientPhoto, format, rightX - 51.5, y - 5.5, 24, 24);
+
+      // Label below photo
+      doc.setFontSize(6);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(100, 100, 100);
+      doc.text('FOTO DO CLIENTE', rightX - 39.5, y + 22, { align: 'center' });
+    } catch (photoErr) {
+      console.warn('Client photo embed note:', photoErr);
+    }
+  }
+
   // Section 1: Customer Data
+  const section1Width = clientPhoto ? contentWidth - 55 : contentWidth - 28;
   doc.setFillColor(245, 245, 245);
-  doc.rect(margin, y, contentWidth - 30, 6, 'F');
+  doc.rect(margin, y, section1Width, 6, 'F');
   doc.setTextColor(0, 0, 0);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);
@@ -89,10 +118,10 @@ export async function generateReservationPDF(
 
   const client = reservation.customerSnapshot;
   doc.text(`Nome Completo: ${client.fullName}`, margin + 3, y);
-  doc.text(`CPF: ${client.cpf}`, margin + 95, y);
+  doc.text(`CPF: ${client.cpf}`, margin + 82, y);
   y += 5;
   doc.text(`WhatsApp: ${client.whatsapp}`, margin + 3, y);
-  doc.text(`Data Nasc.: ${client.birthDate || 'Não informada'}`, margin + 95, y);
+  doc.text(`Data Nasc.: ${client.birthDate || 'Não informada'}`, margin + 82, y);
   y += 5;
   doc.text(`E-mail: ${client.email}`, margin + 3, y);
   y += 5;
@@ -211,8 +240,40 @@ export async function generateReservationPDF(
   y += splitText.length * 3.6 + 6;
 
   // Signature lines
-  y = Math.max(y, 242);
+  y = Math.max(y, 240);
   const colWidth = (contentWidth - 10) / 2;
+
+  // Render client's online digital signature if present
+  if (reservation.digitalSignatureUrl) {
+    try {
+      doc.addImage(reservation.digitalSignatureUrl, 'PNG', margin + 8, y - 16, 42, 14);
+      doc.setFontSize(6.5);
+      doc.setFont('helvetica', 'italic');
+      doc.setTextColor(30, 130, 60);
+      const signedDate = reservation.digitalSignedAt 
+        ? new Date(reservation.digitalSignedAt).toLocaleString('pt-BR')
+        : new Date(reservation.createdAt).toLocaleString('pt-BR');
+      doc.text(`[Assinado Digitalmente Online em ${signedDate}]`, margin + 3, y - 1);
+    } catch (sigErr) {
+      console.warn('Signature image embed note:', sigErr);
+    }
+  }
+
+  // Render Administrator Signature for Sergio de Sousa Bruce
+  const adminSignedDate = reservation.paymentConfirmedAt
+    ? new Date(reservation.paymentConfirmedAt).toLocaleDateString('pt-BR')
+    : new Date().toLocaleDateString('pt-BR');
+
+  // Stylish script representation of Sergio de Sousa Bruce signature
+  doc.setFont('times', 'italic');
+  doc.setFontSize(16);
+  doc.setTextColor(20, 40, 120); // Professional signature blue ink color
+  doc.text('Sergio de Sousa Bruce', margin + colWidth + 20, y - 5);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6.5);
+  doc.setTextColor(40, 120, 60);
+  doc.text(`[Validado & Assinado Digitalmente pelo Administrador em ${adminSignedDate}]`, margin + colWidth + 12, y - 1);
 
   doc.setDrawColor(120, 120, 120);
   doc.line(margin, y, margin + colWidth, y);
@@ -223,14 +284,14 @@ export async function generateReservationPDF(
   doc.setFontSize(8);
   doc.setTextColor(0, 0, 0);
   doc.text('ASSINATURA DO CLIENTE / LOCATÁRIO', margin + 6, y);
-  doc.text('RESPONSÁVEL PEDALAÊ PARINTINS', margin + colWidth + 16, y);
+  doc.text('SERGIO DE SOUSA BRUCE', margin + colWidth + 24, y);
 
   y += 4;
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7.5);
   doc.setTextColor(80, 80, 80);
   doc.text(`CPF: ${client.cpf}`, margin + 6, y);
-  doc.text(`Data: ____/____/2026`, margin + colWidth + 16, y);
+  doc.text(`Responsável PEDALAÊ Parintins • Data: ${adminSignedDate}`, margin + colWidth + 14, y);
 
   // Footer
   doc.setFontSize(7);

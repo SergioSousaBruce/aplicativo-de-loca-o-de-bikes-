@@ -29,18 +29,21 @@ export function buildReservationWhatsAppText(reservation: Reservation): string {
     currency: 'BRL',
   });
 
-  return `Olá! Fiz uma reserva no PEDALAÊ.
+  return `🚲 *NOVA RESERVA PEDALAÊ — PAGAMENTO PIX*
+Olá! Fiz a reserva no site e estou enviando meus dados e o comprovante do PIX:
 
-Reserva: ${reservation.code}
+📋 *Código da Reserva:* ${reservation.code}
+👤 *Cliente:* ${reservation.customerSnapshot.fullName}
+🪪 *CPF:* ${reservation.customerSnapshot.cpf}
+📱 *WhatsApp:* ${reservation.customerSnapshot.whatsapp}
 
-Nome: ${reservation.customerSnapshot.fullName}
-Bike: ${reservation.bikeSnapshot.name}
-Data: ${dateFormatted}
-Horário: ${reservation.startTime}
-Duração: ${reservation.durationHours} ${reservation.durationHours === 1 ? 'hora' : 'horas'}
-Valor: ${valorFormatted}
+🚲 *Bicicleta:* ${reservation.bikeSnapshot.name} (${reservation.bikeSnapshot.code})
+📅 *Data:* ${dateFormatted}
+⏰ *Horário:* ${reservation.startTime} às ${reservation.endTime} (${reservation.durationHours} ${reservation.durationHours === 1 ? 'hora' : 'horas'})
+💰 *Valor Total:* ${valorFormatted}
 
-Estou enviando o comprovante de pagamento.`;
+✍️ *Contrato assinado digitalmente online no sistema.*
+📎 *Estou enviando o comprovante do PIX em anexo nesta conversa para confirmação da reserva!*`;
 }
 
 /**
@@ -85,13 +88,41 @@ export function getWhatsAppReservationUrl(reservation: Reservation, customNumber
 }
 
 /**
- * Gera o link para o cliente enviar o resumo completo para o seu próprio WhatsApp.
+ * Constrói a mensagem enviada pelo Administrador (Sergio de Sousa Bruce) para o WhatsApp do cliente
+ * confirmando o pagamento do PIX e enviando o Termo e Ficha de Locação em PDF assinado.
  */
-export function getWhatsAppClientSelfUrl(reservation: Reservation): string {
+export function buildAdminConfirmAndSendPdfWhatsAppText(reservation: Reservation): string {
+  const parts = reservation.date.split('-');
+  const dateFormatted = parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : reservation.date;
+  const valorFormatted = reservation.totalPrice.toLocaleString('pt-BR', {
+    style: 'currency',
+    currency: 'BRL',
+  });
+
+  return `🚲 *PEDALAÊ — PAGAMENTO CONFIRMADO & BIKE LIBERADA!* 🌴
+Olá, *${reservation.customerSnapshot.fullName}*! Aqui é o Sergio de Sousa Bruce do PEDALAÊ Parintins.
+
+✅ Confirmamos o seu pagamento via PIX para a reserva *${reservation.code}*!
+Estou anexando aqui o seu *Termo e Ficha Oficial de Locação em PDF* já com a minha assinatura oficial.
+
+📋 *RESUMO DA SUA LOCAÇÃO:*
+🚲 *Bicicleta:* ${reservation.bikeSnapshot.name} (${reservation.bikeSnapshot.code})
+📅 *Data:* ${dateFormatted}
+⏰ *Horário:* ${reservation.startTime} às ${reservation.endTime} (${reservation.durationHours} ${reservation.durationHours === 1 ? 'hora' : 'horas'})
+💰 *Valor Pago:* ${valorFormatted} (PIX Confirmado)
+
+📍 *Ponto de Retirada:* Orla de Parintins - AM
+Tenha um ótimo passeio e aproveite a pedalada! Qualquer dúvida estamos à disposição.`;
+}
+
+/**
+ * Gera o link direto para o WhatsApp do cliente com a mensagem de confirmação do Sergio Bruce.
+ */
+export function getWhatsAppSendTermToClientUrl(reservation: Reservation): string {
   let phone = reservation.customerSnapshot.whatsapp.replace(/\D/g, '');
   if (phone.length === 10 || phone.length === 11) {
     phone = `55${phone}`;
   }
-  const text = encodeURIComponent(buildClientSelfSummaryWhatsAppText(reservation));
+  const text = encodeURIComponent(buildAdminConfirmAndSendPdfWhatsAppText(reservation));
   return `https://wa.me/${phone}?text=${text}`;
 }

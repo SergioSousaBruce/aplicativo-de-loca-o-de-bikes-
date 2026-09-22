@@ -44,7 +44,8 @@ d) Sublocar ou ceder a bicicleta a terceiros não cadastrados.
 5. DA RETIRADA, IDENTIFICAÇÃO E ASSINATURA FÍSICA
 A entrega da bicicleta está condicionada à conferência documental com foto e CPF e à assinatura física deste Termo no ato da retirada na unidade do PEDALAÊ em Parintins/AM.`,
   cancellationPolicy: 'Cancelamentos podem ser solicitados pelo cliente com antecedência mínima de 1 hora do início da reserva. A devolução ou crédito é avaliada e autorizada pela administração do PEDALAÊ.',
-  adminPasswordHash: 'admin123', // Default admin access PIN/password
+  adminPasswordHash: 'admin123', // Initial seed password, customizable by administrator in settings
+  adminEmail: 'sergiobruce19@gmail.com',
 };
 
 export const INITIAL_BIKES: Bike[] = [

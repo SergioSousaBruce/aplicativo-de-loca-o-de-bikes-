@@ -41,15 +41,17 @@ import {
 import { 
   buildReservationWhatsAppText, 
   OFFICIAL_WHATSAPP_LINK,
-  getWhatsAppReservationUrl,
-  getWhatsAppClientSelfUrl
+  getWhatsAppReservationUrl
 } from '../lib/whatsapp';
 import { generateReservationPDF } from '../lib/pdfGenerator';
+import { getBikeCurrentStatus } from '../lib/bikeAvailability';
 import QRCode from 'qrcode';
+import { SignaturePad } from './SignaturePad';
 
 interface BookingFlowProps {
   settings: SystemSettings;
   bikes: Bike[];
+  reservations?: Reservation[];
   initialBike?: Bike | null;
   onCancel: () => void;
   onFinished: (reservation: Reservation) => void;
@@ -60,37 +62,69 @@ type Step = 1 | 2 | 3 | 4 | 5 | 6;
 export const BookingFlow: React.FC<BookingFlowProps> = ({
   settings,
   bikes,
+  reservations = [],
   initialBike,
   onCancel,
   onFinished,
 }) => {
-  const [currentStep, setCurrentStep] = useState<Step>(1);
+  // Load draft from localStorage if available
+  const savedBookingDraft = (() => {
+    try {
+      const raw = localStorage.getItem('pedalae_booking_draft');
+      if (raw) return JSON.parse(raw);
+    } catch {}
+    return null;
+  })();
 
-  // Step 1: Bike Selection & Plan
-  const [selectedBike, setSelectedBike] = useState<Bike | null>(
-    initialBike || bikes.find((b) => b.status === 'available') || null
-  );
-  const [selectedPlan, setSelectedPlan] = useState<RentalPlan>(
-    settings.plans[1] || settings.plans[0]
-  );
+  const [currentStep, setCurrentStep] = useState<Step>(() => {
+    if (savedBookingDraft && savedBookingDraft.currentStep >= 1 && savedBookingDraft.currentStep <= 6) {
+      return savedBookingDraft.currentStep as Step;
+    }
+    return 1;
+  });
+
+  // Step 1: Bike Selection & Plan - select bike that is truly available
+  const availableBikeFallback = bikes.find((b) => getBikeCurrentStatus(b, reservations).isAvailable) || null;
+  const [selectedBike, setSelectedBike] = useState<Bike | null>(() => {
+    if (savedBookingDraft?.selectedBikeId) {
+      const foundInBikes = bikes.find((b) => b.id === savedBookingDraft.selectedBikeId);
+      if (foundInBikes) return foundInBikes;
+    }
+    if (initialBike && getBikeCurrentStatus(initialBike, reservations).isAvailable) {
+      return initialBike;
+    }
+    return availableBikeFallback;
+  });
+
+  const [selectedPlan, setSelectedPlan] = useState<RentalPlan>(() => {
+    if (savedBookingDraft?.selectedPlanDuration) {
+      const foundPlan = settings.plans.find((p) => p.durationHours === savedBookingDraft.selectedPlanDuration);
+      if (foundPlan) return foundPlan;
+    }
+    return settings.plans[1] || settings.plans[0];
+  });
 
   // Step 2: Date & Slot Selection
   // Default to today in YYYY-MM-DD local format
   const todayStr = new Date().toISOString().split('T')[0];
-  const [selectedDate, setSelectedDate] = useState<string>(todayStr);
-  const [selectedStartTime, setSelectedStartTime] = useState<string>('15:00');
+  const [selectedDate, setSelectedDate] = useState<string>(() => {
+    return savedBookingDraft?.selectedDate || todayStr;
+  });
+  const [selectedStartTime, setSelectedStartTime] = useState<string>(() => {
+    return savedBookingDraft?.selectedStartTime || '15:00';
+  });
   const [existingDateReservations, setExistingDateReservations] = useState<Reservation[]>([]);
   const [loadingSlots, setLoadingSlots] = useState<boolean>(false);
   const [conflictError, setConflictError] = useState<string | null>(null);
 
   // Step 3: Customer Information
-  const [fullName, setFullName] = useState('');
-  const [cpf, setCpf] = useState('');
-  const [birthDate, setBirthDate] = useState('');
-  const [whatsapp, setWhatsapp] = useState('');
-  const [email, setEmail] = useState('');
-  const [fullAddress, setFullAddress] = useState('');
-  const [photoBase64, setPhotoBase64] = useState<string>('');
+  const [fullName, setFullName] = useState<string>(() => savedBookingDraft?.fullName || '');
+  const [cpf, setCpf] = useState<string>(() => savedBookingDraft?.cpf || '');
+  const [birthDate, setBirthDate] = useState<string>(() => savedBookingDraft?.birthDate || '');
+  const [whatsapp, setWhatsapp] = useState<string>(() => savedBookingDraft?.whatsapp || '');
+  const [email, setEmail] = useState<string>(() => savedBookingDraft?.email || '');
+  const [fullAddress, setFullAddress] = useState<string>(() => savedBookingDraft?.fullAddress || '');
+  const [photoBase64, setPhotoBase64] = useState<string>(() => savedBookingDraft?.photoBase64 || '');
   const [isCameraActive, setIsCameraActive] = useState(false);
   const [searchingClient, setSearchingClient] = useState(false);
   const [clientFoundMessage, setClientFoundMessage] = useState<string | null>(null);
@@ -98,18 +132,71 @@ export const BookingFlow: React.FC<BookingFlowProps> = ({
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   // Step 4: Terms & Summary
-  const [termsAccepted, setTermsAccepted] = useState(false);
-  const [lgpdAccepted, setLgpdAccepted] = useState(true);
+  const [termsAccepted, setTermsAccepted] = useState<boolean>(() => !!savedBookingDraft?.termsAccepted);
+  const [lgpdAccepted, setLgpdAccepted] = useState<boolean>(() => savedBookingDraft?.lgpdAccepted ?? true);
+  const [digitalSignatureUrl, setDigitalSignatureUrl] = useState<string | null>(() => savedBookingDraft?.digitalSignatureUrl || null);
 
   // Step 5 & 6: Confirmation & Created Reservation
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [createdReservation, setCreatedReservation] = useState<Reservation | null>(null);
+  const [createdReservation, setCreatedReservation] = useState<Reservation | null>(() => {
+    return savedBookingDraft?.createdReservation || null;
+  });
   const [copiedPix, setCopiedPix] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
-  const [qrCodeUrl, setQrCodeUrl] = useState<string>('');
+  const [qrCodeUrl, setQrCodeUrl] = useState<string>(() => savedBookingDraft?.qrCodeUrl || '');
   const [paymentProofBase64, setPaymentProofBase64] = useState<string | null>(null);
   const [isUploadingProof, setIsUploadingProof] = useState(false);
   const [proofSavedSuccess, setProofSavedSuccess] = useState(false);
+
+  // Save draft to localStorage whenever relevant state changes
+  useEffect(() => {
+    try {
+      const draft = {
+        currentStep,
+        selectedBikeId: selectedBike?.id,
+        selectedPlanDuration: selectedPlan?.durationHours,
+        selectedDate,
+        selectedStartTime,
+        fullName,
+        cpf,
+        birthDate,
+        whatsapp,
+        email,
+        fullAddress,
+        photoBase64,
+        termsAccepted,
+        lgpdAccepted,
+        digitalSignatureUrl,
+        createdReservation,
+        qrCodeUrl,
+      };
+      localStorage.setItem('pedalae_booking_draft', JSON.stringify(draft));
+    } catch {}
+  }, [
+    currentStep,
+    selectedBike,
+    selectedPlan,
+    selectedDate,
+    selectedStartTime,
+    fullName,
+    cpf,
+    birthDate,
+    whatsapp,
+    email,
+    fullAddress,
+    photoBase64,
+    termsAccepted,
+    lgpdAccepted,
+    digitalSignatureUrl,
+    createdReservation,
+    qrCodeUrl,
+  ]);
+
+  const clearBookingDraft = () => {
+    try {
+      localStorage.removeItem('pedalae_booking_draft');
+    } catch {}
+  };
 
   // Fetch reservations for the selected bike & date to display slot statuses
   useEffect(() => {
@@ -315,6 +402,10 @@ export const BookingFlow: React.FC<BookingFlowProps> = ({
       alert('É obrigatório ler e aceitar o Termo de Compromisso e Responsabilidade.');
       return;
     }
+    if (!digitalSignatureUrl) {
+      alert('Por favor, assine digitalmente no campo indicado abaixo antes de finalizar a reserva.');
+      return;
+    }
     if (!selectedBike) return;
 
     setIsSubmitting(true);
@@ -374,6 +465,10 @@ export const BookingFlow: React.FC<BookingFlowProps> = ({
         status: 'aguardando_pagamento',
         termAgreedOnline: true,
         termAgreedAt: Date.now(),
+        digitalSignatureUrl: digitalSignatureUrl,
+        digitalSignedAt: Date.now(),
+        digitalSignerName: fullName.trim(),
+        digitalSignerCpf: cpf.trim(),
         createdAt: Date.now(),
         updatedAt: Date.now(),
       };
@@ -410,7 +505,7 @@ export const BookingFlow: React.FC<BookingFlowProps> = ({
   const copyPixKey = () => {
     navigator.clipboard.writeText(settings.pixKey);
     setCopiedPix(true);
-    setTimeout(() => setCopiedPix(false), 2500);
+    setTimeout(() => setCopiedPix(false), 3000);
   };
 
   const copyReservationCode = () => {
@@ -424,12 +519,6 @@ export const BookingFlow: React.FC<BookingFlowProps> = ({
   const openWhatsAppWithProof = () => {
     if (!createdReservation) return;
     const url = getWhatsAppReservationUrl(createdReservation, settings.whatsappDisplay);
-    window.open(url, '_blank');
-  };
-
-  const openWhatsAppToMySelf = () => {
-    if (!createdReservation) return;
-    const url = getWhatsAppClientSelfUrl(createdReservation);
     window.open(url, '_blank');
   };
 
@@ -489,6 +578,9 @@ export const BookingFlow: React.FC<BookingFlowProps> = ({
                 if (currentStep > 1 && currentStep <= 4) {
                   setCurrentStep((prev) => (prev - 1) as Step);
                 } else {
+                  if (currentStep === 1 || currentStep >= 5) {
+                    clearBookingDraft();
+                  }
                   onCancel();
                 }
               }}
@@ -530,6 +622,26 @@ export const BookingFlow: React.FC<BookingFlowProps> = ({
               );
             })}
           </div>
+
+          {/* Restored Progress Alert */}
+          {currentStep > 1 && currentStep <= 4 && (
+            <div className="mt-3 flex items-center justify-between px-3 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-[11px] text-amber-300">
+              <span className="flex items-center gap-1.5 font-medium">
+                <Sparkles className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" />
+                Continuando de onde você parou (Etapa {currentStep})
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  clearBookingDraft();
+                  setCurrentStep(1);
+                }}
+                className="text-[10px] text-zinc-400 hover:text-white underline font-semibold ml-2"
+              >
+                Recomeçar
+              </button>
+            </div>
+          )}
         </div>
 
         {/* ================= STEP 1: BIKE & PLAN ================= */}
@@ -551,19 +663,22 @@ export const BookingFlow: React.FC<BookingFlowProps> = ({
               </label>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {bikes.map((bike) => {
-                  const isAvailable = bike.status === 'available';
+                  const bikeStatus = getBikeCurrentStatus(bike, reservations);
+                  const isAvailable = bikeStatus.isAvailable;
                   const isSelected = selectedBike?.id === bike.id;
                   return (
                     <div
                       key={bike.id}
                       id={`booking-select-bike-${bike.code.toLowerCase()}`}
                       onClick={() => isAvailable && setSelectedBike(bike)}
-                      className={`relative rounded-2xl p-3.5 border-2 transition-all cursor-pointer flex gap-3.5 ${
-                        !isAvailable
+                      className={`relative rounded-2xl p-3.5 border-2 transition-all flex gap-3.5 ${
+                        bikeStatus.isInUse
+                          ? 'opacity-85 bg-rose-950/20 border-rose-900/60 cursor-not-allowed'
+                          : !isAvailable
                           ? 'opacity-40 bg-zinc-950 border-zinc-800 cursor-not-allowed'
                           : isSelected
-                          ? 'bg-amber-500/15 border-amber-400 ring-2 ring-amber-400/40 shadow-lg shadow-amber-500/10'
-                          : 'bg-zinc-900/90 border-zinc-800 hover:border-amber-500/50'
+                          ? 'bg-amber-500/15 border-amber-400 ring-2 ring-amber-400/40 shadow-lg shadow-amber-500/10 cursor-pointer'
+                          : 'bg-zinc-900/90 border-zinc-800 hover:border-amber-500/50 cursor-pointer'
                       }`}
                     >
                       <div className="relative w-24 h-32 rounded-xl overflow-hidden bg-black flex-shrink-0 border border-zinc-800">
@@ -576,6 +691,11 @@ export const BookingFlow: React.FC<BookingFlowProps> = ({
                         <span className="absolute bottom-1 left-1 bg-black/80 px-1.5 py-0.5 rounded text-[10px] font-mono font-bold text-amber-400">
                           {bike.code}
                         </span>
+                        {bikeStatus.isInUse && (
+                          <div className="absolute top-1 right-1 bg-rose-600 text-white text-[9px] font-black px-1.5 py-0.5 rounded shadow">
+                            EM USO
+                          </div>
+                        )}
                       </div>
                       <div className="flex flex-col justify-between flex-grow">
                         <div>
@@ -600,9 +720,22 @@ export const BookingFlow: React.FC<BookingFlowProps> = ({
                             <span className="bg-zinc-950 px-1.5 py-0.5 rounded border border-zinc-800">Câmbio suave</span>
                           </div>
                         </div>
-                        <span className="text-[11px] text-emerald-400 font-bold mt-1">
-                          {isAvailable ? '🟢 Pronta para pedalar' : '🔴 Em Manutenção'}
-                        </span>
+
+                        {bikeStatus.isInUse ? (
+                          <div className="mt-1">
+                            <span className="text-[11px] text-rose-400 font-bold flex items-center gap-1">
+                              <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
+                              Bike em uso
+                            </span>
+                            <p className="text-[10px] text-zinc-400 font-medium">
+                              {bikeStatus.availabilityNotice}
+                            </p>
+                          </div>
+                        ) : (
+                          <span className={`text-[11px] font-bold mt-1 ${isAvailable ? 'text-emerald-400' : 'text-rose-400'}`}>
+                            {isAvailable ? '🟢 Pronta para pedalar' : '🔴 Em Manutenção'}
+                          </span>
+                        )}
                       </div>
                     </div>
                   );
@@ -1093,12 +1226,28 @@ export const BookingFlow: React.FC<BookingFlowProps> = ({
               </div>
 
               {/* Legal Terms Box */}
-              <div className="pt-2">
+              <div className="pt-2 space-y-4">
                 <div className="border border-zinc-800 rounded-xl p-3 bg-black/60 max-h-36 overflow-y-auto text-[11px] text-zinc-400 space-y-2 leading-relaxed">
                   <div className="font-bold text-zinc-200">
                     Termo de Compromisso e Responsabilidade Civil - PEDALAÊ
                   </div>
                   <p>{settings.termText}</p>
+                </div>
+
+                {/* Online Digital Signature Pad */}
+                <div className="bg-zinc-950 p-4 rounded-2xl border border-amber-500/30 space-y-3">
+                  <SignaturePad
+                    initialSignature={digitalSignatureUrl}
+                    onSignatureChange={(sig) => setDigitalSignatureUrl(sig)}
+                    label="Assinatura Online do Locatário"
+                    helperText="Assine com o dedo na tela ou com o mouse para validar seu contrato"
+                  />
+                  {digitalSignatureUrl && (
+                    <div className="text-[11px] text-zinc-400 bg-black/50 p-2.5 rounded-xl border border-zinc-800 flex items-center justify-between">
+                      <span>Signatário: <strong>{fullName || 'Cliente'}</strong></span>
+                      <span className="text-amber-400 font-mono text-[10px]">CPF: {cpf || 'Pendente'}</span>
+                    </div>
+                  )}
                 </div>
 
                 <div className="mt-3 space-y-2">
@@ -1108,10 +1257,10 @@ export const BookingFlow: React.FC<BookingFlowProps> = ({
                       type="checkbox"
                       checked={termsAccepted}
                       onChange={(e) => setTermsAccepted(e.target.checked)}
-                      className="mt-0.5 w-4 h-4 rounded text-amber-500 focus:ring-amber-400 bg-zinc-900 border-zinc-700"
+                      className="mt-0.5 w-4 h-4 rounded text-amber-500 focus:ring-amber-400 bg-zinc-900 border-zinc-700 cursor-pointer"
                     />
                     <span className="text-xs text-zinc-300">
-                      Li e estou ciente do <strong className="text-amber-400">Termo de Compromisso e Responsabilidade</strong>. Declaro que realizarei a assinatura física no momento da retirada.
+                      Li, compreendi e concordo integralmente com o <strong className="text-amber-400">Termo de Compromisso e Responsabilidade</strong> e confirmo a veracidade da minha assinatura digital acima.
                     </span>
                   </label>
 
@@ -1121,7 +1270,7 @@ export const BookingFlow: React.FC<BookingFlowProps> = ({
                       type="checkbox"
                       checked={lgpdAccepted}
                       onChange={(e) => setLgpdAccepted(e.target.checked)}
-                      className="mt-0.5 w-4 h-4 rounded text-amber-500 focus:ring-amber-400 bg-zinc-900 border-zinc-700"
+                      className="mt-0.5 w-4 h-4 rounded text-amber-500 focus:ring-amber-400 bg-zinc-900 border-zinc-700 cursor-pointer"
                     />
                     <span className="text-[11px] text-zinc-400">
                       Concordo com o armazenamento dos meus dados para fins exclusivos desta locação e futuros atendimentos no PEDALAÊ (LGPD).
@@ -1135,15 +1284,15 @@ export const BookingFlow: React.FC<BookingFlowProps> = ({
             <div>
               <button
                 id="btn-confirm-booking-final"
-                disabled={!termsAccepted || isSubmitting}
+                disabled={!termsAccepted || !digitalSignatureUrl || isSubmitting}
                 onClick={handleFinalSubmit}
-                className="w-full py-4 rounded-2xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-black font-black text-sm uppercase tracking-wider flex items-center justify-center gap-2 active:scale-98 transition-all shadow-xl shadow-amber-500/25"
+                className="w-full py-4 rounded-2xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-black font-black text-sm uppercase tracking-wider flex items-center justify-center gap-2 active:scale-98 transition-all shadow-xl shadow-amber-500/25 cursor-pointer"
               >
                 {isSubmitting ? (
                   <span>Processando Reserva...</span>
                 ) : (
                   <>
-                    <span>Confirmar Reserva e Gerar PIX</span>
+                    <span>Confirmar com Assinatura e Gerar PIX</span>
                     <ArrowRight className="w-4 h-4" />
                   </>
                 )}
@@ -1191,101 +1340,52 @@ export const BookingFlow: React.FC<BookingFlowProps> = ({
                   Beneficiário: {settings.pixBeneficiary || 'PEDALAÊ LOCAÇÃO DE BIKES'}
                 </div>
 
-                <button
-                  id="btn-copy-pix-key"
-                  onClick={copyPixKey}
-                  className="w-full py-2.5 px-4 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer"
-                >
-                  <Copy className="w-3.5 h-3.5 text-amber-400" />
-                  <span>{copiedPix ? 'Chave Copiada com Sucesso!' : 'COPIAR CHAVE PIX'}</span>
-                </button>
-              </div>
-
-              {/* Instructions */}
-              <div className="p-3.5 rounded-xl bg-amber-500/5 border border-amber-500/20 text-xs text-zinc-300 text-left space-y-2">
-                <div className="font-bold text-amber-400 flex items-center gap-1.5">
-                  <Sparkles className="w-3.5 h-3.5" />
-                  Instruções para Confirmação:
-                </div>
-                <p>1. Faça a transferência PIX no aplicativo do seu banco.</p>
-                <p>2. Envie o comprovante ou anexe-o aqui no sistema.</p>
-                <p>3. Você pode enviar para o WhatsApp oficial ou receber todas as informações no seu próprio WhatsApp!</p>
-              </div>
-
-              {/* Upload Comprovante (Opcional ou Direto) */}
-              <div className="bg-black border border-zinc-800 rounded-xl p-4 text-left space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-zinc-200 flex items-center gap-1.5">
-                    <ImageIcon className="w-4 h-4 text-amber-400" />
-                    Anexar Comprovante do PIX (Opcional):
-                  </span>
-                  {paymentProofBase64 && (
-                    <span className="inline-flex items-center gap-1 text-[11px] text-emerald-400 font-bold">
-                      <CheckCircle className="w-3.5 h-3.5" /> Anexado
-                    </span>
-                  )}
-                </div>
-
-                <div className="flex flex-col sm:flex-row gap-2.5 items-center">
-                  <label
-                    id="btn-upload-pix-proof"
-                    className="w-full sm:w-auto flex-1 inline-flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-200 text-xs font-bold border border-zinc-700 hover:border-amber-400/50 cursor-pointer transition-colors"
+                <div className="flex items-center gap-2 pt-1">
+                  <button
+                    id="btn-copy-pix-key"
+                    onClick={copyPixKey}
+                    className="flex-1 py-2.5 px-4 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer"
                   >
-                    <Upload className="w-4 h-4 text-amber-400" />
-                    <span>{paymentProofBase64 ? 'Trocar Comprovante' : 'Escolher Arquivo / Foto do Comprovante'}</span>
-                    <input
-                      type="file"
-                      accept="image/*,.pdf"
-                      onChange={handleProofFileUpload}
-                      className="hidden"
-                    />
-                  </label>
-
-                  {paymentProofBase64 && (
-                    <a
-                      href={paymentProofBase64}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-xs text-amber-400 hover:underline font-semibold whitespace-nowrap"
-                    >
-                      Visualizar
-                    </a>
-                  )}
+                    <Copy className="w-3.5 h-3.5 text-amber-400" />
+                    <span>{copiedPix ? 'Chave Copiada!' : 'Copiar Apenas Chave PIX'}</span>
+                  </button>
                 </div>
-
-                {proofSavedSuccess && (
-                  <p className="text-[11px] text-emerald-400 font-medium">
-                    ✓ Comprovante anexado à reserva com sucesso!
-                  </p>
-                )}
               </div>
 
-              {/* Buttons */}
-              <div className="space-y-2.5 pt-2">
+              {/* Why WhatsApp explanation */}
+              <div className="bg-black/70 border border-zinc-800/90 rounded-2xl p-4 text-left space-y-2">
+                <div className="flex items-center gap-2 text-amber-400 font-bold text-xs">
+                  <ShieldCheck className="w-4 h-4 text-amber-400" />
+                  <span>Envio do Comprovante via WhatsApp</span>
+                </div>
+                <p className="text-xs text-zinc-300 leading-relaxed">
+                  Copie a chave PIX acima para fazer o pagamento no seu banco. Em seguida, clique no botão abaixo para enviar o comprovante ou PDF diretamente para o nosso WhatsApp para a liberação da sua bike!
+                </p>
+                <div className="text-[11px] text-emerald-400 font-medium flex items-center gap-1.5 pt-0.5">
+                  <CheckCircle className="w-3.5 h-3.5" />
+                  <span>Atendimento rápido e confirmação com a equipe do PEDALAÊ.</span>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="space-y-3 pt-1">
+                {/* Primary Button: Open WhatsApp directly to send proof */}
                 <button
                   id="btn-open-whatsapp-pix"
                   onClick={openWhatsAppWithProof}
-                  className="w-full py-4 rounded-2xl bg-[#25D366] hover:bg-[#20ba59] text-white font-black text-sm uppercase tracking-wider flex items-center justify-center gap-2 active:scale-98 transition-all shadow-lg shadow-emerald-500/20 cursor-pointer"
+                  className="w-full py-4 rounded-xl bg-[#25D366] hover:bg-[#20ba59] text-white font-extrabold text-xs sm:text-sm uppercase tracking-wider flex items-center justify-center gap-2 active:scale-98 transition-all shadow-md shadow-emerald-500/20 cursor-pointer"
                 >
                   <Send className="w-4 h-4 fill-white" />
-                  <span>ENVIAR COMPROVANTE PARA O PEDALAÊ</span>
+                  <span>ENVIAR COMPROVANTE NO WHATSAPP DO PEDALAÊ</span>
                 </button>
 
-                <button
-                  id="btn-send-to-my-whatsapp"
-                  onClick={openWhatsAppToMySelf}
-                  className="w-full py-3.5 rounded-2xl bg-zinc-900 hover:bg-zinc-800 border-2 border-emerald-500/50 hover:border-emerald-400 text-emerald-400 font-black text-xs sm:text-sm uppercase tracking-wider flex items-center justify-center gap-2 active:scale-98 transition-all cursor-pointer shadow-md"
-                >
-                  <Smartphone className="w-4 h-4 text-emerald-400" />
-                  <span>ENVIAR RESUMO PARA O MEU WHATSAPP</span>
-                </button>
-
+                {/* Button: Proceed to Step 6 */}
                 <button
                   id="btn-proceed-to-confirmation"
                   onClick={() => setCurrentStep(6)}
-                  className="w-full py-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold text-xs uppercase tracking-wider cursor-pointer"
+                  className="w-full py-3.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold text-xs uppercase tracking-wider cursor-pointer"
                 >
-                  Ver Detalhes e Comprovante da Reserva
+                  Ver Código e QR Code da Reserva
                 </button>
               </div>
             </div>
@@ -1392,18 +1492,9 @@ export const BookingFlow: React.FC<BookingFlowProps> = ({
 
               <div className="space-y-2.5">
                 <button
-                  id="btn-send-to-my-whatsapp-step6"
-                  onClick={openWhatsAppToMySelf}
-                  className="w-full py-3.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-emerald-500/50 hover:border-emerald-400 text-emerald-400 font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md"
-                >
-                  <Smartphone className="w-4 h-4 text-emerald-400" />
-                  <span>ENVIAR TUDO PARA O MEU WHATSAPP</span>
-                </button>
-
-                <button
                   id="btn-open-whatsapp-client-end"
                   onClick={openWhatsAppWithProof}
-                  className="w-full py-3.5 rounded-xl bg-[#25D366] hover:bg-[#20ba59] text-white font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer"
+                  className="w-full py-4 rounded-xl bg-[#25D366] hover:bg-[#20ba59] text-white font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-emerald-500/20"
                 >
                   <Send className="w-4 h-4 fill-white" />
                   <span>ABRIR WHATSAPP OFICIAL (PEDALAÊ)</span>
@@ -1412,7 +1503,10 @@ export const BookingFlow: React.FC<BookingFlowProps> = ({
 
               <button
                 id="btn-finish-and-back-home"
-                onClick={onCancel}
+                onClick={() => {
+                  clearBookingDraft();
+                  onCancel();
+                }}
                 className="w-full text-center text-xs text-zinc-400 hover:text-white py-2"
               >
                 ← Voltar para a Página Inicial
